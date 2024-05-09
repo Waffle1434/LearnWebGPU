@@ -146,6 +146,81 @@ int main (int, char**) {
             renderPassDesc.nextInChain            = nullptr;
 
             RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
+            {
+                const char* shaderSource = R"(
+                    @vertex
+                    fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
+                        var p = vec2f(0.0, 0.0);
+                        if (in_vertex_index == 0u) {
+                            p = vec2f(-0.5, -0.5);
+                        } else if (in_vertex_index == 1u) {
+                            p = vec2f(0.5, -0.5);
+                        } else {
+                            p = vec2f(0.0, 0.5);
+                        }
+                        return vec4f(p, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs_main() -> @location(0) vec4f {
+                        return vec4f(1.0, 0.0, 0.0, 1.0);
+                    }
+                )";
+
+                ShaderModuleWGSLDescriptor shaderCodeDesc;
+                shaderCodeDesc.chain.next  = nullptr;
+                shaderCodeDesc.chain.sType = SType::ShaderModuleWGSLDescriptor;
+                shaderCodeDesc.code = shaderSource;
+
+                ShaderModuleDescriptor shaderDesc;
+                #ifdef WEBGPU_BACKEND_WGPU
+                    shaderDesc.hintCount = 0;
+                    shaderDesc.hints = nullptr;
+                #endif
+                shaderDesc.nextInChain = &shaderCodeDesc.chain;
+                ShaderModule shaderModule = device.createShaderModule(shaderDesc);
+
+                RenderPipelineDescriptor pipelineDesc;
+                pipelineDesc.vertex.bufferCount   = 0;
+                pipelineDesc.vertex.buffers       = nullptr;
+                pipelineDesc.vertex.module        = shaderModule;
+                pipelineDesc.vertex.entryPoint    = "vs_main";
+                pipelineDesc.vertex.constantCount = 0;
+                pipelineDesc.vertex.constants     = nullptr;
+                pipelineDesc.primitive.topology   = PrimitiveTopology::TriangleList;
+                pipelineDesc.primitive.stripIndexFormat = IndexFormat::Undefined;
+                pipelineDesc.primitive.frontFace  = FrontFace::CCW;
+                pipelineDesc.primitive.cullMode   = CullMode::None;
+                pipelineDesc.multisample.count    = 1;
+                pipelineDesc.multisample.mask     = ~0u; // Default value for the mask, meaning "all bits on"
+                pipelineDesc.multisample.alphaToCoverageEnabled = false;
+                pipelineDesc.layout               = nullptr;
+
+                BlendState blendState;
+                blendState.color.srcFactor = BlendFactor::SrcAlpha;
+                blendState.color.dstFactor = BlendFactor::OneMinusSrcAlpha;
+                blendState.color.operation = BlendOperation::Add;
+
+                ColorTargetState colorTarget;
+                colorTarget.format = swapChainFormat;
+                colorTarget.blend = &blendState;
+                colorTarget.writeMask = ColorWriteMask::All;
+
+                FragmentState fragmentState;
+                fragmentState.module = shaderModule;
+                fragmentState.entryPoint = "fs_main";
+                fragmentState.constantCount = 0;
+                fragmentState.constants = nullptr;
+                fragmentState.targetCount = 1;
+                fragmentState.targets = &colorTarget;
+                pipelineDesc.fragment = &fragmentState;
+                pipelineDesc.depthStencil = nullptr;
+
+                RenderPipeline pipeline = device.createRenderPipeline(pipelineDesc);
+
+                renderPass.setPipeline(pipeline);
+                renderPass.draw(3, 1, 0, 0); // Draw triangle
+            }
             renderPass.end();
             renderPass.release();
 
