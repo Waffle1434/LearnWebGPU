@@ -7,7 +7,10 @@ project(
 
 add_executable(WebGPU_App main.cpp)
 add_subdirectory(glfw) # Native Window (https://www.glfw.org/)
-target_link_libraries(WebGPU_App PRIVATE glfw)
+add_subdirectory(webgpu) # Case sensitive, can't be WebGPU
+add_subdirectory(glfw3webgpu)
+target_link_libraries(WebGPU_App PRIVATE glfw webgpu glfw3webgpu)
+target_copy_webgpu_binaries(WebGPU_App)
 
 set_target_properties(WebGPU_App PROPERTIES
     CXX_STANDARD 17
