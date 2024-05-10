@@ -6,7 +6,9 @@ project(
 )
 
 add_executable(WebGPU_App main.cpp)
-add_subdirectory(glfw) # Native Window (https://www.glfw.org/)
+if (NOT EMSCRIPTEN)
+    add_subdirectory(glfw) # Native Window (https://www.glfw.org/)
+endif()
 add_subdirectory(webgpu) # Case sensitive, can't be WebGPU
 add_subdirectory(glfw3webgpu)
 target_link_libraries(WebGPU_App PRIVATE glfw webgpu glfw3webgpu)
@@ -22,4 +24,13 @@ if (MSVC)
     target_compile_options(WebGPU_App PRIVATE /W4)
 else()
     target_compile_options(WebGPU_App PRIVATE -Wall -Wextra -pedantic)
+endif()
+
+if (EMSCRIPTEN)
+    target_link_options(WebGPU_App PRIVATE
+        -sUSE_GLFW=3 # Use Emscripten-provided GLFW
+        -sUSE_WEBGPU # Handle WebGPU symbols
+        -sASYNCIFY   # Required by WebGPU-C++
+    )
+    set_target_properties(WebGPU_App PROPERTIES SUFFIX ".html")
 endif()

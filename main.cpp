@@ -1,6 +1,6 @@
 #include <iostream>
 #include <cassert>
-//#include <vector>
+#include <cmath>
 #include <GLFW/glfw3.h> // Native Window
 #include <webgpu/webgpu.h>
 #define WEBGPU_CPP_IMPLEMENTATION
@@ -8,6 +8,8 @@
 #include <glfw3webgpu.h>
 
 using namespace wgpu;
+
+// https://eliemichel.github.io/LearnWebGPU
 
 Adapter requestAdapter(Instance instance, RequestAdapterOptions const * options) { // https://eliemichel.github.io/LearnWebGPU/getting-started/the-adapter.html#request
     struct UserData {
@@ -83,23 +85,23 @@ int main (int, char**) {
     RequestAdapterOptions adapterOpts = {};
     adapterOpts.nextInChain       = nullptr;
     adapterOpts.compatibleSurface = surface;
-    Adapter adapter = instance.requestAdapter(adapterOpts); // https://eliemichel.github.io/LearnWebGPU/getting-started/the-adapter.html
+    Adapter adapter = instance.requestAdapter(adapterOpts);
 
     DeviceDescriptor deviceDesc = {};
-    deviceDesc.nextInChain = nullptr;
-    deviceDesc.label = "Device"; // anything works here, that's your call
-    deviceDesc.requiredFeaturesCount = 0; // we do not require any specific feature
-    deviceDesc.requiredLimits = nullptr; // we do not require any specific limit
+    deviceDesc.nextInChain              = nullptr;
+    deviceDesc.label                    = "Device";
+    deviceDesc.requiredFeaturesCount    = 0;
+    deviceDesc.requiredLimits           = nullptr;
     deviceDesc.defaultQueue.nextInChain = nullptr;
-    deviceDesc.defaultQueue.label = "Default Queue";
-    Device device = adapter.requestDevice(deviceDesc); // https://eliemichel.github.io/LearnWebGPU/getting-started/the-device.html
+    deviceDesc.defaultQueue.label       = "Default Queue";
+    Device device = adapter.requestDevice(deviceDesc);
     device.setUncapturedErrorCallback([](WGPUErrorType type, char const* message) {
         std::cout << "Uncaptured device error: type " << type;
         if (message) std::cout << " (" << message << ")";
         std::cout << std::endl;
     });
 
-    Queue queue = device.getQueue(); // https://eliemichel.github.io/LearnWebGPU/getting-started/the-command-queue.html#queue-operations
+    Queue queue = device.getQueue();
 
     TextureFormat swapChainFormat = surface.getPreferredFormat(adapter);
     SwapChainDescriptor swapChainDesc = {};
@@ -111,134 +113,119 @@ int main (int, char**) {
     swapChainDesc.presentMode = WGPUPresentMode_Immediate;
     SwapChain swapChain = device.createSwapChain(surface, swapChainDesc);
 
+    const char* shaderSource = R"(
+        @vertex
+        fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
+            var p = vec2f(0.0, 0.0);
+            if (in_vertex_index == 0u) {
+                p = vec2f(-0.5, -0.5);
+            } else if (in_vertex_index == 1u) {
+                p = vec2f(0.5, -0.5);
+            } else {
+                p = vec2f(0.0, 0.5);
+            }
+            return vec4f(p, 0.0, 1.0);
+        }
+
+        @fragment
+        fn fs_main() -> @location(0) vec4f {
+            return vec4f(1.0, 0.0, 0.0, 1.0);
+        }
+    )";
+
+    ShaderModuleWGSLDescriptor shaderCodeDesc;
+    shaderCodeDesc.chain.next  = nullptr;
+    shaderCodeDesc.chain.sType = SType::ShaderModuleWGSLDescriptor;
+    shaderCodeDesc.code = shaderSource;
+
+    ShaderModuleDescriptor shaderDesc;
+#ifdef WEBGPU_BACKEND_WGPU
+    shaderDesc.hintCount = 0;
+    shaderDesc.hints = nullptr;
+#endif
+    shaderDesc.nextInChain = &shaderCodeDesc.chain;
+    ShaderModule shaderModule = device.createShaderModule(shaderDesc);
+
+    BlendState blendState;
+    blendState.color.srcFactor = BlendFactor::SrcAlpha;
+    blendState.color.dstFactor = BlendFactor::OneMinusSrcAlpha;
+    blendState.color.operation = BlendOperation::Add;
+
+    ColorTargetState colorTarget;
+    colorTarget.format    = swapChainFormat;
+    colorTarget.blend     = &blendState;
+    colorTarget.writeMask = ColorWriteMask::All;
+
+    FragmentState fragmentState;
+    fragmentState.module        = shaderModule;
+    fragmentState.entryPoint    = "fs_main";
+    fragmentState.constantCount = 0;
+    fragmentState.constants     = nullptr;
+    fragmentState.targetCount   = 1;
+    fragmentState.targets       = &colorTarget;
+
+    RenderPipelineDescriptor pipelineDesc;
+    pipelineDesc.vertex.bufferCount   = 0;
+    pipelineDesc.vertex.buffers       = nullptr;
+    pipelineDesc.vertex.module        = shaderModule;
+    pipelineDesc.vertex.entryPoint    = "vs_main";
+    pipelineDesc.vertex.constantCount = 0;
+    pipelineDesc.vertex.constants     = nullptr;
+    pipelineDesc.primitive.topology   = PrimitiveTopology::TriangleList;
+    pipelineDesc.primitive.stripIndexFormat = IndexFormat::Undefined;
+    pipelineDesc.primitive.frontFace  = FrontFace::CCW;
+    pipelineDesc.primitive.cullMode   = CullMode::None;
+    pipelineDesc.multisample.count    = 1;
+    pipelineDesc.multisample.mask     = ~0u; // Default value for the mask, meaning "all bits on"
+    pipelineDesc.multisample.alphaToCoverageEnabled = false;
+    pipelineDesc.layout               = nullptr;
+    pipelineDesc.fragment             = &fragmentState;
+    pipelineDesc.depthStencil         = nullptr;
+    RenderPipeline pipeline = device.createRenderPipeline(pipelineDesc);
+
+    CommandEncoderDescriptor encoderDesc = {};
+    encoderDesc.nextInChain = nullptr;
+    encoderDesc.label       = "Command Encoder";
+
+    RenderPassColorAttachment renderPassColorAttachment = {};
+    renderPassColorAttachment.loadOp  = WGPULoadOp_Clear;
+    renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
+
+    RenderPassDescriptor renderPassDesc = {};
+    renderPassDesc.colorAttachmentCount = 1;
+    renderPassDesc.colorAttachments     = &renderPassColorAttachment;
+
+    CommandBufferDescriptor cmdBufferDescriptor = {};
+    cmdBufferDescriptor.nextInChain = nullptr;
+    cmdBufferDescriptor.label       = "Command buffer";
+
+    int i_frame = 0;
+
     // Main Loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         TextureView RT = swapChain.getCurrentTextureView();
-        if (!RT) {
-            std::cerr << "Cannot acquire next swap chain texture" << std::endl;
-            break;
-        }
+        CommandEncoder encoder = device.createCommandEncoder(encoderDesc);
 
-        {
-            // Create Command Encoder
-            CommandEncoderDescriptor encoderDesc = {};
-            encoderDesc.nextInChain = nullptr;
-            encoderDesc.label       = "Command Encoder";
-            CommandEncoder encoder = device.createCommandEncoder(encoderDesc);
-            // https://eliemichel.github.io/LearnWebGPU/getting-started/the-command-queue.html#command-encoder
+        renderPassColorAttachment.view          = RT;
+        renderPassColorAttachment.resolveTarget = nullptr; // For MSAA
+        renderPassColorAttachment.clearValue    = WGPUColor{ 0.0, sin(0.0025 * i_frame), 0.0, 1.0 };
 
-            RenderPassColorAttachment renderPassColorAttachment = {};
-            renderPassColorAttachment.view          = RT;
-            renderPassColorAttachment.resolveTarget = nullptr; // For MSAA
-            renderPassColorAttachment.loadOp        = WGPULoadOp_Clear;
-            renderPassColorAttachment.storeOp       = WGPUStoreOp_Store;
-            renderPassColorAttachment.clearValue    = WGPUColor{ 0.0, 1.0, 0.0, 1.0 };
+        RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
+        renderPass.setPipeline(pipeline);
+        renderPass.draw(3, 1, 0, 0); // Draw triangle
+        renderPass.end();
+        renderPass.release();
 
-            // Encode Render Pass
-            RenderPassDescriptor renderPassDesc = {};
-            renderPassDesc.colorAttachmentCount   = 1;
-            renderPassDesc.colorAttachments       = &renderPassColorAttachment;
-            renderPassDesc.depthStencilAttachment = nullptr;
-            renderPassDesc.timestampWriteCount    = 0;
-            renderPassDesc.timestampWrites        = nullptr;
-            renderPassDesc.nextInChain            = nullptr;
-
-            RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
-            {
-                const char* shaderSource = R"(
-                    @vertex
-                    fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
-                        var p = vec2f(0.0, 0.0);
-                        if (in_vertex_index == 0u) {
-                            p = vec2f(-0.5, -0.5);
-                        } else if (in_vertex_index == 1u) {
-                            p = vec2f(0.5, -0.5);
-                        } else {
-                            p = vec2f(0.0, 0.5);
-                        }
-                        return vec4f(p, 0.0, 1.0);
-                    }
-
-                    @fragment
-                    fn fs_main() -> @location(0) vec4f {
-                        return vec4f(1.0, 0.0, 0.0, 1.0);
-                    }
-                )";
-
-                ShaderModuleWGSLDescriptor shaderCodeDesc;
-                shaderCodeDesc.chain.next  = nullptr;
-                shaderCodeDesc.chain.sType = SType::ShaderModuleWGSLDescriptor;
-                shaderCodeDesc.code = shaderSource;
-
-                ShaderModuleDescriptor shaderDesc;
-                #ifdef WEBGPU_BACKEND_WGPU
-                    shaderDesc.hintCount = 0;
-                    shaderDesc.hints = nullptr;
-                #endif
-                shaderDesc.nextInChain = &shaderCodeDesc.chain;
-                ShaderModule shaderModule = device.createShaderModule(shaderDesc);
-
-                RenderPipelineDescriptor pipelineDesc;
-                pipelineDesc.vertex.bufferCount   = 0;
-                pipelineDesc.vertex.buffers       = nullptr;
-                pipelineDesc.vertex.module        = shaderModule;
-                pipelineDesc.vertex.entryPoint    = "vs_main";
-                pipelineDesc.vertex.constantCount = 0;
-                pipelineDesc.vertex.constants     = nullptr;
-                pipelineDesc.primitive.topology   = PrimitiveTopology::TriangleList;
-                pipelineDesc.primitive.stripIndexFormat = IndexFormat::Undefined;
-                pipelineDesc.primitive.frontFace  = FrontFace::CCW;
-                pipelineDesc.primitive.cullMode   = CullMode::None;
-                pipelineDesc.multisample.count    = 1;
-                pipelineDesc.multisample.mask     = ~0u; // Default value for the mask, meaning "all bits on"
-                pipelineDesc.multisample.alphaToCoverageEnabled = false;
-                pipelineDesc.layout               = nullptr;
-
-                BlendState blendState;
-                blendState.color.srcFactor = BlendFactor::SrcAlpha;
-                blendState.color.dstFactor = BlendFactor::OneMinusSrcAlpha;
-                blendState.color.operation = BlendOperation::Add;
-
-                ColorTargetState colorTarget;
-                colorTarget.format = swapChainFormat;
-                colorTarget.blend = &blendState;
-                colorTarget.writeMask = ColorWriteMask::All;
-
-                FragmentState fragmentState;
-                fragmentState.module = shaderModule;
-                fragmentState.entryPoint = "fs_main";
-                fragmentState.constantCount = 0;
-                fragmentState.constants = nullptr;
-                fragmentState.targetCount = 1;
-                fragmentState.targets = &colorTarget;
-                pipelineDesc.fragment = &fragmentState;
-                pipelineDesc.depthStencil = nullptr;
-
-                RenderPipeline pipeline = device.createRenderPipeline(pipelineDesc);
-
-                renderPass.setPipeline(pipeline);
-                renderPass.draw(3, 1, 0, 0); // Draw triangle
-            }
-            renderPass.end();
-            renderPass.release();
-
-            // Finish encoding and submit
-            CommandBufferDescriptor cmdBufferDescriptor = {};
-            cmdBufferDescriptor.nextInChain = nullptr;
-            cmdBufferDescriptor.label = "Command buffer";
-            CommandBuffer command = encoder.finish(cmdBufferDescriptor);
-            encoder.release();
-            queue.submit(1, &command);
-    #ifdef WEBGPU_BACKEND_DAWN
-            encoder.release();
-            command.release();
-    #endif
-        }
+        CommandBuffer command = encoder.finish(cmdBufferDescriptor);
+        queue.submit(1, &command);
+        encoder.release();
+        command.release();
 
         RT.release();
         swapChain.present();
+        i_frame++;
     }
 
     swapChain.release();
